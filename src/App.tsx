@@ -1,19 +1,46 @@
-import { Button } from "@/components/ui/button"
+import { lazy, Suspense, useState } from "react"
+import { ContactDetail } from "./components/ContactDetail"
+
+const Dashboard = lazy(() => import("./components/Dashboard").then((m) => ({ default: m.Dashboard })))
+
+function Spinner() {
+  return (
+    <div className="flex min-h-svh items-center justify-center">
+      <svg
+        className="size-8 animate-spin text-muted-foreground"
+        viewBox="0 0 24 24"
+        fill="none"
+      >
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path
+          className="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+        />
+      </svg>
+    </div>
+  )
+}
 
 export function App() {
-  return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
-          <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
-        </div>
-        <div className="font-mono text-xs text-muted-foreground">
-          (Press <kbd>d</kbd> to toggle dark mode)
-        </div>
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+
+  if (selectedKey) {
+    return (
+      <div className="min-h-svh">
+        <ContactDetail
+          conversationKey={selectedKey}
+          onBack={() => setSelectedKey(null)}
+        />
       </div>
+    )
+  }
+
+  return (
+    <div className="min-h-svh">
+      <Suspense fallback={<Spinner />}>
+        <Dashboard onSelectConversation={setSelectedKey} />
+      </Suspense>
     </div>
   )
 }
