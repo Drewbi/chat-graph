@@ -1,21 +1,5 @@
-# React + TypeScript + Vite + shadcn/ui
+# Chat Graph
 
-This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
+A chat frequency analysis website for inspecting who you've talked to over time. Performance is still a slight issue but has been getting better. Mostly vibe coded with Claude.
 
-## Adding components
-
-To add components to your app, run the following command:
-
-```bash
-npx shadcn@latest add button
-```
-
-This will place the ui components in the `src/components` directory.
-
-## Using components
-
-To use the components in your app, import them as follows:
-
-```tsx
-import { Button } from "@/components/ui/button"
-```
+<img width="1064" height="938" alt="image" src="https://github.com/user-attachments/assets/b2f367c9-c25e-4c31-b470-94b8383bcd5c" />
