@@ -2,17 +2,19 @@ import { fixEncoding } from "./encoding"
 import type {
   ConversationDetail,
   ConversationSummary,
+  DailyPoint,
   FacebookMessage,
   FacebookMessageFile,
   WeeklyPoint,
 } from "./types"
 
 // ---------------------------------------------------------------------------
-// Glob import
+// Glob import — lazy, returns loader functions
 // ---------------------------------------------------------------------------
-const rawModules = import.meta.glob("/data/**/messages/*/*/message_*.json", {
-  eager: true,
-}) as Record<string, { default: FacebookMessageFile }>
+const fileLoaders = import.meta.glob("/data/**/messages/*/*/message_*.json") as Record<
+  string,
+  () => Promise<{ default: FacebookMessageFile }>
+>
 
 // ---------------------------------------------------------------------------
 // Week arithmetic — no Date objects per message
@@ -49,38 +51,9 @@ function getWeekMeta(weekNum: number): { weekStart: number; week: string } {
 }
 
 // ---------------------------------------------------------------------------
-// Pre-build fileByKey map — O(n) once, not O(n) per conversation lookup
+// Pre-build fileByKey map — populated by dataReady
 // ---------------------------------------------------------------------------
 const fileByKey = new Map<string, FacebookMessageFile>()
-
-for (const [filePath, mod] of Object.entries(rawModules)) {
-  const messagesIdx = filePath.indexOf("/messages/")
-  if (messagesIdx === -1) continue
-  const parts = filePath.slice(messagesIdx + 10).split("/")
-  if (parts.length < 2) continue
-  const key = parts[1]
-  if (!fileByKey.has(key)) fileByKey.set(key, mod.default)
-}
-
-// ---------------------------------------------------------------------------
-// Group messages by conversation key
-// ---------------------------------------------------------------------------
-function groupByConversation(): Map<string, FacebookMessage[]> {
-  const grouped = new Map<string, FacebookMessage[]>()
-
-  for (const [filePath, mod] of Object.entries(rawModules)) {
-    const messagesIdx = filePath.indexOf("/messages/")
-    if (messagesIdx === -1) continue
-    const parts = filePath.slice(messagesIdx + 10).split("/")
-    if (parts.length < 2) continue
-    const key = parts[1]
-
-    const existing = grouped.get(key) ?? []
-    grouped.set(key, existing.concat(mod.default.messages))
-  }
-
-  return grouped
-}
 
 // ---------------------------------------------------------------------------
 // Week bucket — stored per conversation, pre-computed once
@@ -95,6 +68,29 @@ interface WeekBucket {
 
 // Stored alongside each summary for use by buildTopNWeekly and getConversationDetail
 const weekBucketsByKey = new Map<string, Map<number, WeekBucket>>()
+
+// ---------------------------------------------------------------------------
+// Day bucket — stored per conversation, pre-computed once
+// ---------------------------------------------------------------------------
+interface DayBucket {
+  dateStr: string           // "YYYY-MM-DD"
+  ts: number                // UTC start-of-day
+  total: number
+  sent: number
+  received: number
+  senderCounts: Record<string, number>
+}
+
+const dayBucketsByKey = new Map<string, Map<string, DayBucket>>()
+
+function tsToDayStr(ts: number): string {
+  const d = new Date(ts)
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`
+}
+
+function tsToDayStart(ts: number): number {
+  return Math.floor(ts / 86400000) * 86400000
+}
 
 // ---------------------------------------------------------------------------
 // Derive owner name
@@ -140,8 +136,9 @@ function buildSummaries(
       file.thread_type === "RegularGroup" ||
       participants.length > 2
 
-    // Single pass: stats + week buckets + group detection
+    // Single pass: stats + week buckets + day buckets + group detection
     const buckets = new Map<number, WeekBucket>()
+    const dayBuckets = new Map<string, DayBucket>()
 
     for (const msg of messages) {
       const ts = msg.timestamp_ms
@@ -151,13 +148,15 @@ function buildSummaries(
       // Skip Instagram reaction system messages ("Reacted X to your message")
       if (msg.content && /^Reacted .+ to your message/.test(msg.content)) continue
 
-      const isSent = fixEncoding(msg.sender_name) === ownerName
+      const senderFixed = fixEncoding(msg.sender_name)
+      const isSent = senderFixed === ownerName
       if (isSent) sent++; else received++
 
       if (!isGroup && msg.content) {
         isGroup = /\b(left the group|named the group|added .+ to the group|created the group|your invite link|group video chat)\b/i.test(msg.content)
       }
 
+      // Week bucket
       const weekNum = tsToWeekNum(ts)
       let bucket = buckets.get(weekNum)
       if (!bucket) {
@@ -167,9 +166,21 @@ function buildSummaries(
       }
       bucket.total++
       if (isSent) bucket.sent++; else bucket.received++
+
+      // Day bucket
+      const dayStr = tsToDayStr(ts)
+      let dayBucket = dayBuckets.get(dayStr)
+      if (!dayBucket) {
+        dayBucket = { dateStr: dayStr, ts: tsToDayStart(ts), total: 0, sent: 0, received: 0, senderCounts: {} }
+        dayBuckets.set(dayStr, dayBucket)
+      }
+      dayBucket.total++
+      if (isSent) dayBucket.sent++; else dayBucket.received++
+      dayBucket.senderCounts[senderFixed] = (dayBucket.senderCounts[senderFixed] ?? 0) + 1
     }
 
     weekBucketsByKey.set(key, buckets)
+    dayBucketsByKey.set(key, dayBuckets)
 
     summaries.push({
       key,
@@ -223,13 +234,76 @@ function buildTopNWeekly(
 }
 
 // ---------------------------------------------------------------------------
-// Module-level computed exports
+// Loading status — readable via useSyncExternalStore
 // ---------------------------------------------------------------------------
-const grouped = groupByConversation()
-export const ownerName: string = deriveOwnerName(grouped)
-export const allConversations: ConversationSummary[] = buildSummaries(grouped, ownerName)
+let _loadingStatus = "Starting..."
+const _statusSubscribers = new Set<() => void>()
+
+function setStatus(s: string) {
+  _loadingStatus = s
+  _statusSubscribers.forEach((cb) => cb())
+}
+
+export function getLoadingStatus() { return _loadingStatus }
+export function subscribeLoadingStatus(cb: () => void) {
+  _statusSubscribers.add(cb)
+  return () => { _statusSubscribers.delete(cb) }
+}
+
+// ---------------------------------------------------------------------------
+// Module-level state — populated when dataReady resolves
+// ---------------------------------------------------------------------------
+export let ownerName = ""
+export let allConversations: ConversationSummary[] = []
+export let hasData = false
 
 export type ConversationTypeFilter = "individuals" | "groups"
+
+// Resolves once all files are loaded and processed. Suspend components with use(dataReady).
+export const dataReady: Promise<void> = (async () => {
+  const entries = Object.entries(fileLoaders)
+  if (entries.length === 0) return
+
+  const total = entries.length
+  let done = 0
+  setStatus(`Loading files (0 / ${total})`)
+
+  const loaded = await Promise.all(
+    entries.map(async ([path, loader]) => {
+      const mod = await loader()
+      setStatus(`Loading files (${++done} / ${total})`)
+      return { path, file: mod.default }
+    })
+  )
+
+  setStatus("Processing conversations...")
+
+  // fileByKey: first file per conversation key holds the metadata
+  for (const { path, file } of loaded) {
+    const idx = path.indexOf("/messages/")
+    if (idx === -1) continue
+    const parts = path.slice(idx + 10).split("/")
+    if (parts.length < 2) continue
+    const key = parts[1]
+    if (!fileByKey.has(key)) fileByKey.set(key, file)
+  }
+
+  // Group all messages by conversation key
+  const grouped = new Map<string, FacebookMessage[]>()
+  for (const { path, file } of loaded) {
+    const idx = path.indexOf("/messages/")
+    if (idx === -1) continue
+    const parts = path.slice(idx + 10).split("/")
+    if (parts.length < 2) continue
+    const key = parts[1]
+    const existing = grouped.get(key) ?? []
+    grouped.set(key, existing.concat(file.messages))
+  }
+
+  ownerName = deriveOwnerName(grouped)
+  allConversations = buildSummaries(grouped, ownerName)
+  hasData = true
+})()
 
 const weeklyCache = new Map<string, WeeklyPoint[]>()
 
@@ -289,7 +363,11 @@ export function getConversationDetail(key: string): ConversationDetail | null {
     .sort(([a], [b]) => a - b)
     .map(([, b]) => ({ week: b.week, weekStart: b.weekStart, sent: b.sent, received: b.received }))
 
-  return { summary, weeklyActivity }
+  const rawDayBuckets = dayBucketsByKey.get(key)
+  const dailyActivity: DailyPoint[] = rawDayBuckets
+    ? Array.from(rawDayBuckets.values()).sort((a, b) => a.ts - b.ts)
+    : []
+
+  return { summary, weeklyActivity, dailyActivity }
 }
 
-export const hasData = Object.keys(rawModules).length > 0

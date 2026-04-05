@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useState, useTransition } from "react"
+import { use, useCallback, useMemo, useState, useTransition } from "react"
 import { LeaderboardCard } from "./LeaderboardCard"
 import { StackedAreaCard } from "./StackedAreaCard"
 import { FilterBar, type FilterValues } from "./FilterBar"
-import { allConversations, hasData, ownerName } from "@/lib/data"
+import { allConversations, dataReady, hasData, ownerName } from "@/lib/data"
 
 interface DashboardProps {
   onSelectConversation: (key: string) => void
@@ -23,6 +23,8 @@ function tsToMonthInput(ts: number): string {
 }
 
 export function Dashboard({ onSelectConversation }: DashboardProps) {
+  use(dataReady) // suspend until all data files are loaded and processed
+
   const [isPending, startTransition] = useTransition()
 
   const { dataFrom, dataTo } = useMemo(() => {

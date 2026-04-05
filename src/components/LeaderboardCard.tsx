@@ -1,9 +1,10 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getConversationsInWindow, type ConversationTypeFilter } from "@/lib/data"
 import { rankToCoralColor } from "@/lib/colors"
 import type { ConversationSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { Button } from "./ui/button"
 
 interface LeaderboardCardProps {
   onSelect: (key: string) => void
@@ -19,7 +20,7 @@ export function LeaderboardCard({ onSelect, filter, fromTs, toTs, isPending }: L
     [filter, fromTs, toTs]
   )
   const maxMessages = conversations[0]?.totalMessages ?? 1
-  const displayCount = Math.min(conversations.length, 100)
+  const [displayCount, setDisplayCount] = useState(Math.min(conversations.length, 100))
 
   return (
     <Card className="relative flex flex-col">
@@ -48,9 +49,12 @@ export function LeaderboardCard({ onSelect, filter, fromTs, toTs, isPending }: L
           ))}
         </div>
         {conversations.length > displayCount && (
-          <p className="mt-3 text-center text-xs text-muted-foreground">
-            +{conversations.length - displayCount} more conversations
-          </p>
+          <div className="mt-4 flex flex-col items-center">
+            <Button onClick={() => setDisplayCount((val) => val + 20)}>Load More</Button>
+            <p className="mt-3 text-center text-xs text-muted-foreground">
+              +{conversations.length - displayCount} more conversations
+            </p>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -90,12 +94,14 @@ function LeaderboardRow({ conversation, rank, maxMessages, color, onClick }: Lea
           {conversation.totalMessages.toLocaleString()}
         </span>
       </div>
-      <div className="ml-6 h-1.5 w-full rounded-full bg-muted overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${widthPct}%`, backgroundColor: color }}
-        />
-      </div>
+        <div className="pl-6 w-full">
+          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all"
+              style={{ width: `${widthPct}%`, backgroundColor: color }}
+            />
+          </div>
+        </div>
     </button>
   )
 }

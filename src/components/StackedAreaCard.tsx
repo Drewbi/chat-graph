@@ -35,6 +35,8 @@ export const StackedAreaCard = memo(function StackedAreaCard({
     () => getFilteredConversations(filter).slice(0, n),
     [n, filter]
   )
+
+  const topNMaxMessage = topNSummaries[0].totalMessages ?? null;
   const weeklyData = useMemo(() => getTopNWeeklyData(n, filter), [n, filter])
 
   const { chartConfig, allAreaData, overviewData } = useMemo(() => {
@@ -133,14 +135,14 @@ export const StackedAreaCard = memo(function StackedAreaCard({
                 />
               )}
             />
-            {topNSummaries.map((_: ConversationSummary, i: number) => (
+            {topNSummaries.map((convo: ConversationSummary, i: number) => (
               <Area
                 key={`c${i}`}
                 type="monotone"
                 dataKey={`c${i}`}
                 stackId="1"
                 stroke="none"
-                fill={`var(--color-c${i})`}
+                fill={`hsla(18, ${topNMaxMessage ? 20 + (convo.totalMessages / topNMaxMessage) * 80 : 20}%, 63%, 1)`}
                 fillOpacity={1}
               />
             ))}
@@ -148,7 +150,7 @@ export const StackedAreaCard = memo(function StackedAreaCard({
         </ChartContainer>
 
         {/* Overview — area shape and brush are separate so the area never rescales */}
-        <div className="relative h-28 w-full">
+        <div className="relative h-16 w-full">
           {/* Area shape: fixed domain, no brush, never rescales */}
           <div className="absolute inset-0">
             <ResponsiveContainer width="100%" height="100%">
@@ -178,7 +180,7 @@ export const StackedAreaCard = memo(function StackedAreaCard({
                   dataKey="weekStart"
                   startIndex={brushStart}
                   endIndex={brushEnd}
-                  height={112}
+                  height={64}
                   travellerWidth={6}
                   fill="transparent"
                   stroke="var(--border)"

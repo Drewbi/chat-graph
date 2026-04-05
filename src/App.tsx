@@ -1,11 +1,13 @@
-import { lazy, Suspense, useState } from "react"
+import { lazy, Suspense, useState, useSyncExternalStore } from "react"
 import { ContactDetail } from "./components/ContactDetail"
+import { getLoadingStatus, subscribeLoadingStatus } from "./lib/data"
 
 const Dashboard = lazy(() => import("./components/Dashboard").then((m) => ({ default: m.Dashboard })))
 
-function Spinner() {
+function LoadingScreen() {
+  const status = useSyncExternalStore(subscribeLoadingStatus, getLoadingStatus)
   return (
-    <div className="flex min-h-svh items-center justify-center">
+    <div className="flex min-h-svh flex-col items-center justify-center gap-4">
       <svg
         className="size-8 animate-spin text-muted-foreground"
         viewBox="0 0 24 24"
@@ -18,6 +20,7 @@ function Spinner() {
           d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
         />
       </svg>
+      <p className="text-sm text-muted-foreground tabular-nums">{status}</p>
     </div>
   )
 }
@@ -38,7 +41,7 @@ export function App() {
 
   return (
     <div className="min-h-svh">
-      <Suspense fallback={<Spinner />}>
+      <Suspense fallback={<LoadingScreen />}>
         <Dashboard onSelectConversation={setSelectedKey} />
       </Suspense>
     </div>

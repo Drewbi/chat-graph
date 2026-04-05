@@ -1,26 +1,11 @@
-import { Bar, BarChart, XAxis, YAxis } from "recharts"
-import {
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart"
+import { useState, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { getConversationDetail, ownerName } from "@/lib/data"
+import { longestRunLength } from "@/lib/activity-utils"
 import { ArrowLeftIcon } from "lucide-react"
-
-const chartConfig: ChartConfig = {
-  sent: { label: "Sent", color: "hsl(218, 19%, 38%)" },
-  received: { label: "Received", color: "hsl(18, 83%, 78%)" },
-}
-
-function formatWeekTick(value: number): string {
-  const d = new Date(value)
-  return d.toLocaleDateString("en-AU", { month: "short", year: "2-digit" })
-}
+import { ActivityCalendar } from "./ActivityCalendar"
+import { ActivityWeekGrid } from "./ActivityWeekGrid"
 
 interface ContactDetailProps {
   conversationKey: string
@@ -28,13 +13,25 @@ interface ContactDetailProps {
 }
 
 export function ContactDetail({ conversationKey, onBack }: ContactDetailProps) {
+  const [granularity, setGranularity] = useState<"day" | "week">("day")
   const detail = getConversationDetail(conversationKey)
+
+  // Hooks must be called unconditionally
+  const activeDays = useMemo(
+    () => detail?.dailyActivity.filter((d) => d.total > 0) ?? [],
+    [detail],
+  )
+  const activeDayStrs = useMemo(
+    () => activeDays.map((d) => d.dateStr).sort(),
+    [activeDays],
+  )
+  const longestStreak = useMemo(() => longestRunLength(activeDayStrs), [activeDayStrs])
 
   if (!detail) {
     return (
       <div className="p-6">
         <Button variant="ghost" onClick={onBack}>
-          <ArrowLeftIcon data-icon="inline-start" />
+          <ArrowLeftIcon />
           Back
         </Button>
         <p className="mt-4 text-sm text-muted-foreground">Conversation not found.</p>
@@ -42,7 +39,8 @@ export function ContactDetail({ conversationKey, onBack }: ContactDetailProps) {
     )
   }
 
-  const { summary, weeklyActivity } = detail
+  const { summary, weeklyActivity, dailyActivity } = detail
+
   const firstDate = new Date(summary.firstTimestamp).toLocaleDateString("en-AU", {
     month: "short",
     year: "numeric",
@@ -51,73 +49,80 @@ export function ContactDetail({ conversationKey, onBack }: ContactDetailProps) {
     month: "short",
     year: "numeric",
   })
+
   const sentPct =
     summary.totalMessages > 0
       ? Math.round((summary.sentMessages / summary.totalMessages) * 100)
       : 0
 
+  const realTotal = summary.sentMessages + summary.receivedMessages
+  const activeWeeks = weeklyActivity.filter((w) => w.sent + w.received > 0)
+  const avgPerActiveDay =
+    activeDays.length > 0 ? (realTotal / activeDays.length).toFixed(1) : "—"
+  const avgPerActiveWeek =
+    activeWeeks.length > 0 ? (realTotal / activeWeeks.length).toFixed(1) : "—"
+
   return (
     <div className="flex flex-col gap-6 p-6">
       <div className="flex items-center gap-3">
         <Button variant="ghost" onClick={onBack}>
-          <ArrowLeftIcon data-icon="inline-start" />
+          <ArrowLeftIcon />
           Back
         </Button>
         <div>
           <h1 className="text-xl font-semibold">{summary.title}</h1>
           <p className="text-sm text-muted-foreground">
-            {summary.isGroup ? "Group · " : ""}{firstDate} – {lastDate}
+            {summary.isGroup ? "Group · " : ""}
+            {firstDate} – {lastDate}
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Total messages" value={summary.totalMessages.toLocaleString()} />
-        <StatCard label={`Sent by ${ownerName.split(" ")[0]}`} value={`${summary.sentMessages.toLocaleString()} (${sentPct}%)`} />
+        <StatCard
+          label={`Sent by ${ownerName.split(" ")[0]}`}
+          value={`${summary.sentMessages.toLocaleString()} (${sentPct}%)`}
+        />
         <StatCard label="Received" value={summary.receivedMessages.toLocaleString()} />
-        <StatCard label="Active weeks" value={weeklyActivity.length.toLocaleString()} />
+        <StatCard label="Active days" value={activeDays.length.toLocaleString()} />
+        <StatCard label="Active weeks" value={activeWeeks.length.toLocaleString()} />
+        <StatCard label="Avg / active day" value={avgPerActiveDay} />
+        <StatCard label="Avg / active week" value={avgPerActiveWeek} />
+        <StatCard
+          label="Longest streak"
+          value={longestStreak > 0 ? `${longestStreak} days` : "—"}
+        />
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Weekly Activity</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Activity</CardTitle>
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant={granularity === "day" ? "default" : "ghost"}
+                onClick={() => setGranularity("day")}
+              >
+                Day
+              </Button>
+              <Button
+                size="sm"
+                variant={granularity === "week" ? "default" : "ghost"}
+                onClick={() => setGranularity("week")}
+              >
+                Week
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <ChartContainer config={chartConfig} className="h-64 w-full">
-            <BarChart
-              data={weeklyActivity}
-              margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-            >
-              <XAxis
-                dataKey="weekStart"
-                type="number"
-                scale="time"
-                domain={["dataMin", "dataMax"]}
-                tickFormatter={formatWeekTick}
-                tickCount={8}
-                tick={{ fontSize: 11 }}
-              />
-              <YAxis tick={{ fontSize: 11 }} width={36} />
-              <ChartTooltip
-                content={
-                  <ChartTooltipContent
-                    labelFormatter={(_, payload) => {
-                      const ts = payload?.[0]?.payload?.weekStart
-                      if (!ts) return ""
-                      return new Date(ts).toLocaleDateString("en-AU", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })
-                    }}
-                  />
-                }
-              />
-              <ChartLegend content={<ChartLegendContent />} />
-              <Bar dataKey="sent" stackId="a" fill="var(--color-sent)" />
-              <Bar dataKey="received" stackId="a" fill="var(--color-received)" radius={[2, 2, 0, 0]} />
-            </BarChart>
-          </ChartContainer>
+          {granularity === "day" ? (
+            <ActivityCalendar dailyActivity={dailyActivity} isGroup={summary.isGroup} />
+          ) : (
+            <ActivityWeekGrid weeklyActivity={weeklyActivity} />
+          )}
         </CardContent>
       </Card>
     </div>

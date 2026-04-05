@@ -35,6 +35,16 @@ export interface WeeklyPoint {
   [contactTitle: string]: number | string
 }
 
+/** One data point for the per-conversation day grid */
+export interface DailyPoint {
+  dateStr: string               // "YYYY-MM-DD"
+  ts: number                    // UTC start-of-day timestamp
+  total: number
+  sent: number
+  received: number
+  senderCounts: Record<string, number>  // for group tooltip breakdown
+}
+
 /** Processed data for per-conversation detail view */
 export interface ConversationDetail {
   summary: ConversationSummary
@@ -44,4 +54,5 @@ export interface ConversationDetail {
     sent: number
     received: number
   }[]
+  dailyActivity: DailyPoint[]
 }
